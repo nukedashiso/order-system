@@ -300,9 +300,42 @@ else:
             if ok: st.success(f"彙總已寫入：{excel_path}（{cfg['summary_ws']}）")
             else:  st.warning(f"寫入 Excel 失敗：{info}")
 # ===== 一鍵同步彙總下載 =====
+import io
 
-import base64
-with open(EXCEL_PATH, "rb") as f:
-    b64 = base64.b64encode(f.read()).decode()
-    href = f'<a href="data:application/octet-stream;base64,{b64}" download="orders.xlsx">⬇️ 下載 Excel 檔</a>'
-    st.markdown(href, unsafe_allow_html=True)
+# 只匯出目前店家資料：
+orders_shop = orders.copy()     # 這裡的 orders / items 就是你面板上方已經過濾成該店家的 DataFrame
+items_shop  = items.copy()
+agg_shop    = agg.copy()
+
+# 組「明細」與「總額」欄位
+detail = items_shop.groupby("order_id").apply(
+    lambda d: "; ".join([f"{r['item_name']}x{int(r['qty'])}@{int(r['unit_price'])}" for _, r in d.iterrows()])
+).reset_index(name="明細")
+total  = items_shop.groupby("order_id").apply(
+    lambda d: int((d["qty"]*d["unit_price"]).sum())
+).reset_index(name="總額")
+
+export_orders = (
+    orders_shop.merge(detail, on="order_id", how="left")
+               .merge(total,  on="order_id", how="left")
+               .loc[:, ["created_at","order_id","user_name","明細","總額","note","is_paid"]]
+               .rename(columns={"created_at":"時間","user_name":"姓名","note":"備註","is_paid":"已收款"})
+)
+
+# 產生 Excel 到記憶體
+buf = io.BytesIO()
+with pd.ExcelWriter(buf, engine="openpyxl") as writer:
+    export_orders.to_excel(writer, sheet_name=cfg["orders_ws"], index=False)
+    agg_out = agg_shop.rename(columns={"item_name":"品項","unit_price":"單價","total_qty":"數量","amount":"金額"})
+    agg_out.to_excel(writer, sheet_name=cfg["summary_ws"], index=False)
+buf.seek(0)
+
+# 提供下載
+st.download_button(
+    "⬇️ 下載 Excel（即時產生）",
+    data=buf.getvalue(),
+    file_name=f"{cfg['label']}_orders_{datetime.now(TZ):%Y%m%d}.xlsx",
+    mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+)
+
+
