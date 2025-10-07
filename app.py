@@ -299,3 +299,10 @@ else:
             ok, info = excel_upsert_summary(excel_path, cfg["summary_ws"], agg)
             if ok: st.success(f"彙總已寫入：{excel_path}（{cfg['summary_ws']}）")
             else:  st.warning(f"寫入 Excel 失敗：{info}")
+# ===== 一鍵同步彙總下載 =====
+
+import base64
+with open(EXCEL_PATH, "rb") as f:
+    b64 = base64.b64encode(f.read()).decode()
+    href = f'<a href="data:application/octet-stream;base64,{b64}" download="orders.xlsx">⬇️ 下載 Excel 檔</a>'
+    st.markdown(href, unsafe_allow_html=True)
