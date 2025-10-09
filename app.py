@@ -10,11 +10,11 @@ from zoneinfo import ZoneInfo
 from openpyxl import load_workbook
 
 # ========= 基本設定 =========
-st.set_page_config(page_title="線上點餐（寫入 Excel）", page_icon="🍱", layout="wide")
+st.set_page_config(page_title="月會下午茶線上點餐", page_icon="🍱", layout="wide")
 TZ = ZoneInfo("Asia/Taipei")
 
 # 截單（可用 "18:00" 或 "2025/10/14, 18:00" / "2025-10-14, 18:00"）
-CUTOFF = "18:00"
+CUTOFF = "2025/10/14 12:30"
 
 # Excel 寫入位置（會持續累積）
 EXCEL_PATH = "./exports/orders.xlsx"
@@ -145,19 +145,19 @@ def excel_upsert_summary(excel_path: str, worksheet: str, df: pd.DataFrame):
         return False, str(e)
 
 # ========= 側邊欄：上傳菜單圖 =========
-st.sidebar.title("🍽️ 線上點餐（雙菜單）")
-with st.sidebar.expander("菜單圖片維護（建議上傳 2 張）", expanded=False):
-    files = st.file_uploader("上傳圖片（jpg/png，可多選）", type=["jpg","jpeg","png"], accept_multiple_files=True)
+st.sidebar.title("🍽️ 線上點餐")
+with st.sidebar.expander("菜單圖片維護", expanded=False):
+    files = st.file_uploader("上傳圖片（jpg/png/jpeg）", type=["jpg","jpeg","png"], accept_multiple_files=True)
     if files:
         for f in files:
             Image.open(f).save(IMG_DIR / f"{uuid.uuid4().hex}.png")
         st.success("圖片已上傳！重新整理即可看到。")
 
-mode = st.sidebar.radio("模式 / Mode", ["前台點餐", "管理者模式"])
+mode = st.sidebar.radio("模式 / Mode", ["點餐模式", "確認模式"])
 
 # ========= 前台點餐 =========
-if mode == "前台點餐":
-    st.title("📋 線上點餐（寫入 Excel）")
+if mode == "點餐模式":
+    st.title("📋 線上點餐")
     passed, msg = cutoff_state(CUTOFF)
     st.info(msg)
 
@@ -314,7 +314,7 @@ if mode == "前台點餐":
 
 # ========= 管理者模式 =========
 else:
-    st.title("🔧 餐點確認（管理者）")
+    st.title("🔧 確認模式")
 
     orders = load_orders()
     items  = load_order_items()
@@ -404,3 +404,4 @@ else:
         mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
         use_container_width=True
     )
+
