@@ -8,14 +8,13 @@ from datetime import datetime
 from zoneinfo import ZoneInfo
 from openpyxl import load_workbook
 import io
-from PIL import Image
 
 # ===== 基本設定 =====
 st.set_page_config(page_title="線上點餐（單頁雙菜單｜純圖片）", page_icon="🍱", layout="wide")
 TZ = ZoneInfo("Asia/Taipei")
 
 # 截單（可用 "18:00" 或 "2025/10/14, 18:00"）
-CUTOFF = "2025/10/14 18:00"
+CUTOFF = "2025/10/14 12:00"
 
 # Excel 輸出（可留空 "" 表示不寫入實體 Excel；仍可用管理者面板「即時下載 Excel」）
 EXCEL_PATH = "./exports/orders.xlsx"
@@ -358,3 +357,4 @@ if mode == "前台點餐":
         file_name=f"orders_{datetime.now(TZ):%Y%m%d}.xlsx",
         mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
     )
+
