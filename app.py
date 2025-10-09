@@ -10,11 +10,11 @@ from zoneinfo import ZoneInfo
 from openpyxl import load_workbook
 
 # ========= 基本設定 =========
-st.set_page_config(page_title="月會下午茶線上點餐", page_icon="🍱", layout="wide")
+st.set_page_config(page_title="線上點餐（寫入 Excel）", page_icon="🍱", layout="wide")
 TZ = ZoneInfo("Asia/Taipei")
 
-# 截單（可用 "18:00" 或 "2025/10/14, 12:30" / "2025-10-14, 12:30"）
-CUTOFF = "2025/10/14 12:30"
+# 截單（可用 "18:00" 或 "2025/10/14, 18:00" / "2025-10-14, 18:00"）
+CUTOFF = "18:00"
 
 # Excel 寫入位置（會持續累積）
 EXCEL_PATH = "./exports/orders.xlsx"
@@ -31,8 +31,8 @@ if EXCEL_PATH:
     Path(EXCEL_PATH).parent.mkdir(parents=True, exist_ok=True)
 
 # 本地 CSV（長期累積）
-ORDERS_CSV = DATA_DIR / "orders.csv"          # order_id, user_name, note, created_at, is_paid
-ORDER_ITEMS_CSV = DATA_DIR / "order_items.csv"  # order_id, item_name, qty, unit_price
+ORDERS_CSV = DATA_DIR / "orders.csv"           # order_id, user_name, note, created_at, is_paid
+ORDER_ITEMS_CSV = DATA_DIR / "order_items.csv" # order_id, item_name, qty, unit_price
 
 # ========= CSV I/O =========
 def init_csv(path: Path, columns: list):
@@ -145,15 +145,15 @@ def excel_upsert_summary(excel_path: str, worksheet: str, df: pd.DataFrame):
         return False, str(e)
 
 # ========= 側邊欄：上傳菜單圖 =========
-st.sidebar.title("🍽️ 線上點餐")
-with st.sidebar.expander("菜單圖片維護", expanded=False):
-    files = st.file_uploader("上傳圖片（jpg/png/jpeg）", type=["jpg","jpeg","png"], accept_multiple_files=True)
+st.sidebar.title("🍽️ 線上點餐（雙菜單）")
+with st.sidebar.expander("菜單圖片維護（建議上傳 2 張）", expanded=False):
+    files = st.file_uploader("上傳圖片（jpg/png，可多選）", type=["jpg","jpeg","png"], accept_multiple_files=True)
     if files:
         for f in files:
             Image.open(f).save(IMG_DIR / f"{uuid.uuid4().hex}.png")
         st.success("圖片已上傳！重新整理即可看到。")
 
-mode = st.sidebar.radio("模式 / Mode", ["前台點餐", "餐點確認"])
+mode = st.sidebar.radio("模式 / Mode", ["前台點餐", "管理者模式"])
 
 # ========= 前台點餐 =========
 if mode == "前台點餐":
@@ -161,48 +161,55 @@ if mode == "前台點餐":
     passed, msg = cutoff_state(CUTOFF)
     st.info(msg)
 
-# 顯示兩張菜單（取前兩張）＋ 點擊放大預覽（相容所有版本）
-imgs = sorted([p for p in IMG_DIR.glob("*") if p.suffix.lower() in [".jpg", ".jpeg", ".png"]])
-show_imgs = imgs[:2]
-HAS_MODAL = hasattr(st, "modal")  # 新舊版相容
+    # 顯示兩張菜單（取前兩張）＋ 點擊放大預覽（相容所有版本）
+    imgs = sorted([p for p in IMG_DIR.glob("*") if p.suffix.lower() in [".jpg", ".jpeg", ".png"]])
+    show_imgs = imgs[:2]
+    HAS_MODAL = hasattr(st, "modal")  # 新舊版相容
 
-if show_imgs:
     st.subheader("菜單")
-    cols = st.columns(2)
+    if not show_imgs:
+        st.warning("尚未上傳菜單圖片（側邊欄可上傳）。")
+    else:
+        cols = st.columns(2)
+        for i, p in enumerate(show_imgs):
+            # 縮圖
+            with cols[i % 2]:
+                st.image(str(p), use_container_width=True, caption=f"菜單 {i+1}")
+                if st.button(f"🔍 放大查看（菜單 {i+1}）", key=f"zoom_{i}"):
+                    st.session_state["zoom_target"] = str(p)
 
-    for i, p in enumerate(show_imgs):
-        # 縮圖
-        with cols[i % 2]:
-            st.image(str(p), use_container_width=True, caption=f"菜單 {i+1}")
-            if st.button(f"🔍 放大查看（菜單 {i+1}）", key=f"zoom_{i}"):
-                st.session_state["zoom_target"] = str(p)
-
-        # 若此圖被選為放大
-        if st.session_state.get("zoom_target") == str(p):
-            img = Image.open(p)
-
-            if HAS_MODAL:
-                # ✅ 新版：彈窗預覽
-                with st.modal(f"放大預覽｜菜單 {i+1}", key=f"modal_{i}", max_width=1200):
+            # 若此圖被選為放大
+            if st.session_state.get("zoom_target") == str(p):
+                img = Image.open(p)
+                if HAS_MODAL:
+                    # ✅ 支援新版：彈窗預覽
+                    with st.modal(f"放大預覽｜菜單 {i+1}", key=f"modal_{i}", max_width=1200):
+                        st.image(img, use_container_width=True)
+                        buf = io.BytesIO(); img.save(buf, format="PNG"); buf.seek(0)
+                        st.download_button(
+                            "⬇️ 下載原圖",
+                            data=buf.getvalue(),
+                            file_name=f"menu_{i+1}.png",
+                            mime="image/png",
+                            use_container_width=True
+                        )
+                        if st.button("關閉", key=f"close_{i}", use_container_width=True):
+                            st.session_state.pop("zoom_target", None)
+                else:
+                    # ✅ 舊版相容：頁內預覽
+                    st.markdown(f"### 放大預覽｜菜單 {i+1}")
                     st.image(img, use_container_width=True)
                     buf = io.BytesIO(); img.save(buf, format="PNG"); buf.seek(0)
-                    st.download_button("⬇️ 下載原圖", data=buf.getvalue(),
-                        file_name=f"menu_{i+1}.png", mime="image/png", use_container_width=True)
-                    if st.button("關閉", key=f"close_{i}", use_container_width=True):
+                    st.download_button(
+                        "⬇️ 下載原圖",
+                        data=buf.getvalue(),
+                        file_name=f"menu_{i+1}.png",
+                        mime="image/png",
+                        key=f"dl_{i}"
+                    )
+                    if st.button("關閉預覽", key=f"close_fb_{i}"):
                         st.session_state.pop("zoom_target", None)
-            else:
-                # ✅ 舊版相容：頁內預覽
-                st.markdown(f"### 放大預覽｜菜單 {i+1}")
-                st.image(img, use_container_width=True)
-                buf = io.BytesIO(); img.save(buf, format="PNG"); buf.seek(0)
-                st.download_button("⬇️ 下載原圖", data=buf.getvalue(),
-                    file_name=f"menu_{i+1}.png", mime="image/png", key=f"dl_{i}")
-                if st.button("關閉預覽", key=f"close_fb_{i}"):
-                    st.session_state.pop("zoom_target", None)
-
-    st.divider()
-else:
-    st.warning("尚未上傳菜單圖片（側邊欄可上傳）。")
+        st.divider()
 
     # 點餐列（預設 2 列）
     st.subheader("填寫餐點")
@@ -286,7 +293,7 @@ else:
 
 # ========= 管理者模式 =========
 else:
-    st.title("🔧 餐點確認")
+    st.title("🔧 餐點確認（管理者）")
 
     orders = load_orders()
     items  = load_order_items()
@@ -376,6 +383,3 @@ else:
         mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
         use_container_width=True
     )
-
-
-
