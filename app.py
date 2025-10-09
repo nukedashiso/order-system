@@ -241,8 +241,8 @@ if mode == "點餐模式":
         st.rerun()
 
     c1, c2, _ = st.columns([1, 1, 6])
-    c1.button("新增一列", on_click=add_row, disabled=passed, use_container_width=True)
-    c2.button("清空（保留 2 列）", on_click=clear_rows, disabled=passed, use_container_width=True)
+    c1.button("新增", on_click=add_row, disabled=passed, use_container_width=True)
+    c2.button("清空", on_click=clear_rows, disabled=passed, use_container_width=True)
 
     total = 0
     ver = st.session_state[vkey]  # 目前版本號
@@ -372,7 +372,7 @@ else:
 
     # 即時生成並下載（不依賴磁碟）
     st.divider()
-    st.subheader("下載 Excel（即時產生）")
+    st.subheader("下載 Excel")
     st.caption("包含 Orders（逐單）與 Summary（彙總）兩張工作表。")
 
     # 組「明細」與「總額」欄位
@@ -404,4 +404,5 @@ else:
         mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
         use_container_width=True
     )
+
 
