@@ -4,19 +4,19 @@ import pandas as pd
 from pathlib import Path
 from PIL import Image
 import uuid
+import io
 from datetime import datetime
 from zoneinfo import ZoneInfo
 from openpyxl import load_workbook
-import io
 
-# ===== 基本設定 =====
-st.set_page_config(page_title="線上點餐（單頁雙菜單｜純圖片）", page_icon="🍱", layout="wide")
+# ========= 基本設定 =========
+st.set_page_config(page_title="月會下午茶線上點餐", page_icon="🍱", layout="wide")
 TZ = ZoneInfo("Asia/Taipei")
 
-# 截單（可用 "18:00" 或 "2025/10/14, 18:00"）
-CUTOFF = "2025/10/14 12:00"
+# 截單（可用 "18:00" 或 "2025/10/14, 12:30" / "2025-10-14, 12:30"）
+CUTOFF = "2025/10/14 12:30"
 
-# Excel 輸出（可留空 "" 表示不寫入實體 Excel；仍可用管理者面板「即時下載 Excel」）
+# Excel 寫入位置（會持續累積）
 EXCEL_PATH = "./exports/orders.xlsx"
 ORDERS_WS = "Orders"
 SUMMARY_WS = "Summary"
@@ -24,16 +24,18 @@ SUMMARY_WS = "Summary"
 # 路徑
 BASE = Path(".")
 DATA_DIR = BASE / "data"
-IMG_DIR = BASE / "images" / "menus"  # 放兩張菜單圖片
+IMG_DIR = BASE / "images" / "menus"   # 放兩張菜單圖片
+EXPORT_DIR = Path(EXPORT_PATH).parent if (EXCEL_PATH := EXCEL_PATH) else None  # 保留變數
 DATA_DIR.mkdir(parents=True, exist_ok=True)
 IMG_DIR.mkdir(parents=True, exist_ok=True)
 if EXCEL_PATH:
     Path(EXCEL_PATH).parent.mkdir(parents=True, exist_ok=True)
 
+# 本地 CSV（長期累積）
 ORDERS_CSV = DATA_DIR / "orders.csv"          # order_id, user_name, note, created_at, is_paid
 ORDER_ITEMS_CSV = DATA_DIR / "order_items.csv"  # order_id, item_name, qty, unit_price
 
-# ===== CSV I/O =====
+# ========= CSV I/O =========
 def init_csv(path: Path, columns: list):
     if not path.exists():
         pd.DataFrame(columns=columns).to_csv(path, index=False)
@@ -42,8 +44,9 @@ init_csv(ORDERS_CSV, ["order_id","user_name","note","created_at","is_paid"])
 init_csv(ORDER_ITEMS_CSV, ["order_id","item_name","qty","unit_price"])
 
 def load_orders():
-    return pd.read_csv(ORDERS_CSV, dtype=str) if ORDERS_CSV.exists() else \
-           pd.DataFrame(columns=["order_id","user_name","note","created_at","is_paid"])
+    if ORDERS_CSV.exists():
+        return pd.read_csv(ORDERS_CSV, dtype=str)
+    return pd.DataFrame(columns=["order_id","user_name","note","created_at","is_paid"])
 
 def load_order_items():
     if ORDER_ITEMS_CSV.exists():
@@ -58,8 +61,13 @@ def load_order_items():
 def save_orders(df): df.to_csv(ORDERS_CSV, index=False)
 def save_order_items(df): df.to_csv(ORDER_ITEMS_CSV, index=False)
 
-# ===== 截單邏輯（支援日期+時間或僅時間） =====
+# ========= 截單判定 =========
 def cutoff_state(cutoff_str: str):
+    """
+    回傳 (passed, msg)
+    passed: True=已截單；False=仍可下單
+    支援 'HH:MM' 或 'YYYY/MM/DD, %H:%M' / 'YYYY-%m-%d, %H:%M' / 'YYYY/MM/DD %H:%M'
+    """
     now = datetime.now(TZ)
     try:
         if any(ch in cutoff_str for ch in ["/", "-", "年", "月"]):
@@ -86,10 +94,10 @@ def cutoff_state(cutoff_str: str):
     m = (left.seconds % 3600) // 60
     return False, f"距離截單剩餘 {d} 天 {h} 小時 {m} 分（{cutoff.strftime('%Y/%m/%d %H:%M')}）"
 
-# ===== Excel I/O =====
+# ========= Excel I/O =========
 def excel_append_order(excel_path: str, worksheet: str, row_values: list):
     """
-    逐筆附加：時間, 訂單ID, 姓名, 明細, 總額, 備註, 已收款
+    逐筆附加：時間, 訂單ID, 姓名, 明細(字串), 總額, 備註, 已收款
     """
     if not excel_path:
         return True, "excel_path 未設定，略過寫入"
@@ -129,16 +137,18 @@ def excel_upsert_summary(excel_path: str, worksheet: str, df: pd.DataFrame):
             p, engine="openpyxl", mode=mode,
             if_sheet_exists=("replace" if mode=="a" else None)
         ) as writer:
-            out = df.rename(columns={"item_name":"品項","unit_price":"單價","total_qty":"數量","amount":"金額"})
+            out = df.rename(columns={
+                "item_name":"品項","unit_price":"單價","total_qty":"數量","amount":"金額"
+            })
             out.to_excel(writer, sheet_name=worksheet or "Summary", index=False)
         return True, "OK"
     except Exception as e:
         return False, str(e)
 
-# ===== 側邊欄：上傳兩張菜單圖片 =====
-st.sidebar.title("🍽️ 線上點餐（單頁雙菜單）")
-with st.sidebar.expander("菜單圖片維護（建議上傳 2 張）", expanded=False):
-    files = st.file_uploader("上傳圖片（jpg/png，可多選）", type=["jpg","jpeg","png"], accept_multiple_files=True)
+# ========= 側邊欄：上傳菜單圖 =========
+st.sidebar.title("🍽️ 線上點餐")
+with st.sidebar.expander("菜單圖片維護", expanded=False):
+    files = st.file_uploader("上傳圖片（jpg/png/jpeg）", type=["jpg","jpeg","png"], accept_multiple_files=True)
     if files:
         for f in files:
             Image.open(f).save(IMG_DIR / f"{uuid.uuid4().hex}.png")
@@ -146,49 +156,28 @@ with st.sidebar.expander("菜單圖片維護（建議上傳 2 張）", expanded=
 
 mode = st.sidebar.radio("模式 / Mode", ["前台點餐", "餐點確認"])
 
-# ===== 前台 =====
+# ========= 前台點餐 =========
 if mode == "前台點餐":
-    st.title("📋 線上點餐（單頁雙菜單）")
+    st.title("📋 線上點餐（寫入 Excel）")
     passed, msg = cutoff_state(CUTOFF)
     st.info(msg)
 
-    # 顯示兩張菜單（若多於兩張，取前兩張；不足兩張則顯示有的）
+    # 顯示兩張菜單（取前兩張）
     imgs = sorted([p for p in IMG_DIR.glob("*") if p.suffix.lower() in [".jpg",".jpeg",".png"]])
     show_imgs = imgs[:2]
     if show_imgs:
         st.subheader("菜單")
-        thumb_cols = st.columns(2)
-
+        cols = st.columns(2)
         for i, p in enumerate(show_imgs):
-            with thumb_cols[i % 2]:
+            with cols[i % 2]:
                 st.image(str(p), use_container_width=True, caption=f"菜單 {i+1}")
-                if st.button(f"🔍 放大查看（菜單 {i+1}）", key=f"zoom_btn_{i}"):
-                    st.session_state["zoom_target"] = str(p)
-
-            # 頁內放大預覽（無 modal，相容所有版本）
-            if st.session_state.get("zoom_target") == str(p):
-                img = Image.open(p)
-                st.markdown(f"### 放大預覽｜菜單 {i+1}")
-                st.image(img, use_container_width=True)
-                buf = io.BytesIO()
-                img.save(buf, format="PNG"); buf.seek(0)
-                st.download_button(
-                    "⬇️ 下載原圖",
-                    data=buf.getvalue(),
-                    file_name=f"menu_{i+1}.png",
-                    mime="image/png",
-                    key=f"dl_fallback_{i}"
-                )
-                if st.button("關閉預覽", key=f"close_fb_{i}"):
-                    st.session_state.pop("zoom_target", None)
-
         st.divider()
     else:
         st.warning("尚未上傳菜單圖片（側邊欄可上傳）。")
 
-    # 自由列輸入（預設 2 列）
+    # 點餐列（預設 2 列）
     st.subheader("填寫餐點")
-    session_key = "rows_single_page"
+    session_key = "rows_single_page_store"
     if session_key not in st.session_state:
         st.session_state[session_key] = [
             {"item_name":"","unit_price":0.0,"qty":0},
@@ -205,23 +194,23 @@ if mode == "前台點餐":
         ]
 
     c1, c2, _ = st.columns([1,1,6])
-    c1.button("新增", on_click=add_row, disabled=passed, use_container_width=True)
-    c2.button("清空", on_click=clear_rows, disabled=passed, use_container_width=True)
+    c1.button("新增一列", on_click=add_row, disabled=passed, use_container_width=True)
+    c2.button("清空（保留 2 列）", on_click=clear_rows, disabled=passed, use_container_width=True)
 
     total = 0
-    with st.form("order_form_single_page", clear_on_submit=False):
+    with st.form("order_form_single_page_store", clear_on_submit=False):
         rows = st.session_state[session_key]
         for i, r in enumerate(rows):
             a, b, c, d = st.columns([4,2,2,2])
             r["item_name"]  = a.text_input("品項名稱", r["item_name"], key=f"nm_{i}", disabled=passed)
             r["unit_price"] = b.number_input("單價", min_value=0.0, step=1.0, value=float(r["unit_price"]), key=f"pr_{i}", disabled=passed)
-            r["qty"]        = c.number_input("數量", min_value=0,   step=1,   value=int(r["qty"]), key=f"qt_{i}", disabled=passed)
+            r["qty"]        = c.number_input("數量", min_value=0, step=1, value=int(r["qty"]), key=f"qt_{i}", disabled=passed)
             d.write(f"小計：${int(r['unit_price']*r['qty'])}")
             total += int(r["unit_price"]*r["qty"])
 
         st.markdown(f"### 總計：${total}")
-        name = st.text_input("姓名/暱稱", "", disabled=passed, key="name_single")
-        note = st.text_input("備註（例如不要香菜／飲品糖冰）", "", disabled=passed, key="note_single")
+        name = st.text_input("姓名/暱稱", "", disabled=passed, key="name_single_store")
+        note = st.text_input("備註（例如不要香菜／飲品糖冰）", "", disabled=passed, key="note_single_store")
         submitted = st.form_submit_button("送出訂單", type="primary", use_container_width=True, disabled=passed)
 
     if submitted:
@@ -231,17 +220,16 @@ if mode == "前台點餐":
         if not valid_rows:
             st.error("請至少填一列有效餐點"); st.stop()
 
-        # 寫入本地 CSV
+        # 寫入本地 CSV（長期保存）
         orders_df = load_orders()
         items_df  = load_order_items()
         oid = uuid.uuid4().hex[:12]
         now = datetime.now(TZ).strftime("%Y-%m-%d %H:%M:%S")
 
-        new_order = pd.DataFrame([{
+        orders_df = pd.concat([orders_df, pd.DataFrame([{
             "order_id": oid, "user_name": name.strip(),
             "note": note.strip(), "created_at": now, "is_paid": "否"
-        }])
-        orders_df = pd.concat([orders_df, new_order], ignore_index=True)
+        }])], ignore_index=True)
 
         item_rows = []
         for r in valid_rows:
@@ -254,7 +242,7 @@ if mode == "前台點餐":
         items_df = pd.concat([items_df, pd.DataFrame(item_rows)], ignore_index=True)
         save_orders(orders_df); save_order_items(items_df)
 
-        # 寫入 Excel（若有設定 EXCEL_PATH）
+        # 寫入 Excel（Orders 附加一列）
         if EXCEL_PATH:
             detail_str = "; ".join([f"{r['item_name']}x{int(r['qty'])}@{int(r['unit_price'])}" for r in item_rows])
             ok, info = excel_append_order(
@@ -267,9 +255,10 @@ if mode == "前台點餐":
         st.success(f"訂單送出成功！編號：{oid}")
         st.balloons()
 
-# ===== 管理者模式 =====
+# ========= 管理者模式 =========
+else:
+    st.title("🔧 餐點確認")
 
-    st.title("🔧 餐點確認（單頁）")
     orders = load_orders()
     items  = load_order_items()
 
@@ -277,7 +266,7 @@ if mode == "前台點餐":
         st.info("尚無訂單")
         st.stop()
 
-    # 彙總
+    # 彙總（品項 + 單價）
     agg = items.groupby(["item_name","unit_price"], as_index=False).agg(total_qty=("qty","sum"))
     agg["amount"] = (agg["total_qty"] * agg["unit_price"]).astype(int)
 
@@ -324,12 +313,12 @@ if mode == "前台點餐":
             if ok: st.success(f"彙總已寫入：{EXCEL_PATH}（{SUMMARY_WS}）")
             else:  st.warning(f"寫入 Excel 失敗：{info}")
 
-    # 即時生成並下載 Excel（不依賴磁碟）
+    # 即時生成並下載（不依賴磁碟）
     st.divider()
     st.subheader("下載 Excel（即時產生）")
     st.caption("包含 Orders（逐單）與 Summary（彙總）兩張工作表。")
 
-    # 組「明細」與「總額」
+    # 組「明細」與「總額」欄位
     detail = items.groupby("order_id").apply(
         lambda d: "; ".join([f"{r['item_name']}x{int(r['qty'])}@{int(r['unit_price'])}" for _, r in d.iterrows()])
     ).reset_index(name="明細")
@@ -347,14 +336,4 @@ if mode == "前台點餐":
     buf = io.BytesIO()
     with pd.ExcelWriter(buf, engine="openpyxl") as writer:
         export_orders.to_excel(writer, sheet_name=ORDERS_WS, index=False)
-        agg_out = agg.rename(columns={"item_name":"品項","unit_price":"單價","total_qty":"數量","amount":"金額"})
-        agg_out.to_excel(writer, sheet_name=SUMMARY_WS, index=False)
-    buf.seek(0)
-
-    st.download_button(
-        "⬇️ 下載 Excel（即時產生）",
-        data=buf.getvalue(),
-        file_name=f"orders_{datetime.now(TZ):%Y%m%d}.xlsx",
-        mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
-    )
-
+        agg_out = agg.rename(columns={"item_name":"品項"
