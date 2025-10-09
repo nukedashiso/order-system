@@ -336,4 +336,15 @@ else:
     buf = io.BytesIO()
     with pd.ExcelWriter(buf, engine="openpyxl") as writer:
         export_orders.to_excel(writer, sheet_name=ORDERS_WS, index=False)
-        agg_out = agg.rename(columns={"item_name":"品項"
+        agg_out = agg.rename(columns={"item_name":"品項","unit_price":"單價","total_qty":"數量","amount":"金額"})
+        agg_out.to_excel(writer, sheet_name=SUMMARY_WS, index=False)
+    buf.seek(0)
+
+    st.download_button(
+        "⬇️ 下載 Excel（即時產生）",
+        data=buf.getvalue(),
+        file_name=f"orders_{datetime.now(TZ):%Y%m%d}.xlsx",
+        mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+        use_container_width=True
+    )
+
