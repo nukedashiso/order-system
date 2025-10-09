@@ -161,18 +161,48 @@ if mode == "前台點餐":
     passed, msg = cutoff_state(CUTOFF)
     st.info(msg)
 
-    # 顯示兩張菜單（取前兩張）
-    imgs = sorted([p for p in IMG_DIR.glob("*") if p.suffix.lower() in [".jpg",".jpeg",".png"]])
-    show_imgs = imgs[:2]
-    if show_imgs:
-        st.subheader("菜單")
-        cols = st.columns(2)
-        for i, p in enumerate(show_imgs):
-            with cols[i % 2]:
-                st.image(str(p), use_container_width=True, caption=f"菜單 {i+1}")
-        st.divider()
-    else:
-        st.warning("尚未上傳菜單圖片（側邊欄可上傳）。")
+# 顯示兩張菜單（取前兩張）＋ 點擊放大預覽（相容所有版本）
+imgs = sorted([p for p in IMG_DIR.glob("*") if p.suffix.lower() in [".jpg", ".jpeg", ".png"]])
+show_imgs = imgs[:2]
+HAS_MODAL = hasattr(st, "modal")  # 新舊版相容
+
+if show_imgs:
+    st.subheader("菜單")
+    cols = st.columns(2)
+
+    for i, p in enumerate(show_imgs):
+        # 縮圖
+        with cols[i % 2]:
+            st.image(str(p), use_container_width=True, caption=f"菜單 {i+1}")
+            if st.button(f"🔍 放大查看（菜單 {i+1}）", key=f"zoom_{i}"):
+                st.session_state["zoom_target"] = str(p)
+
+        # 若此圖被選為放大
+        if st.session_state.get("zoom_target") == str(p):
+            img = Image.open(p)
+
+            if HAS_MODAL:
+                # ✅ 新版：彈窗預覽
+                with st.modal(f"放大預覽｜菜單 {i+1}", key=f"modal_{i}", max_width=1200):
+                    st.image(img, use_container_width=True)
+                    buf = io.BytesIO(); img.save(buf, format="PNG"); buf.seek(0)
+                    st.download_button("⬇️ 下載原圖", data=buf.getvalue(),
+                        file_name=f"menu_{i+1}.png", mime="image/png", use_container_width=True)
+                    if st.button("關閉", key=f"close_{i}", use_container_width=True):
+                        st.session_state.pop("zoom_target", None)
+            else:
+                # ✅ 舊版相容：頁內預覽
+                st.markdown(f"### 放大預覽｜菜單 {i+1}")
+                st.image(img, use_container_width=True)
+                buf = io.BytesIO(); img.save(buf, format="PNG"); buf.seek(0)
+                st.download_button("⬇️ 下載原圖", data=buf.getvalue(),
+                    file_name=f"menu_{i+1}.png", mime="image/png", key=f"dl_{i}")
+                if st.button("關閉預覽", key=f"close_fb_{i}"):
+                    st.session_state.pop("zoom_target", None)
+
+    st.divider()
+else:
+    st.warning("尚未上傳菜單圖片（側邊欄可上傳）。")
 
     # 點餐列（預設 2 列）
     st.subheader("填寫餐點")
@@ -346,5 +376,6 @@ else:
         mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
         use_container_width=True
     )
+
 
 
