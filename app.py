@@ -222,12 +222,12 @@ if mode == "前台點餐":
 
     def add_row():
         st.session_state[session_key].append({"item_name":"","unit_price":0.0,"qty":0})
-
     def clear_rows():
         st.session_state[session_key] = [
             {"item_name":"","unit_price":0.0,"qty":0},
             {"item_name":"","unit_price":0.0,"qty":0},
         ]
+        st.rerun()  # ✅ 強制重新整理畫面
 
     c1, c2, _ = st.columns([1,1,6])
     c1.button("新增", on_click=add_row, disabled=passed, use_container_width=True)
@@ -383,4 +383,5 @@ else:
         mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
         use_container_width=True
     )
+
 
