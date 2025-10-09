@@ -10,11 +10,11 @@ from zoneinfo import ZoneInfo
 from openpyxl import load_workbook
 
 # ========= 基本設定 =========
-st.set_page_config(page_title="月會下午茶線上點餐", page_icon="🍱", layout="wide")
+st.set_page_config(page_title="線上點餐（寫入 Excel）", page_icon="🍱", layout="wide")
 TZ = ZoneInfo("Asia/Taipei")
 
 # 截單（可用 "18:00" 或 "2025/10/14, 18:00" / "2025-10-14, 18:00"）
-CUTOFF = "2025/10/14 12:30"
+CUTOFF = "18:00"
 
 # Excel 寫入位置（會持續累積）
 EXCEL_PATH = "./exports/orders.xlsx"
@@ -145,19 +145,19 @@ def excel_upsert_summary(excel_path: str, worksheet: str, df: pd.DataFrame):
         return False, str(e)
 
 # ========= 側邊欄：上傳菜單圖 =========
-st.sidebar.title("🍽️ 線上點餐")
-with st.sidebar.expander("菜單圖片維護", expanded=False):
-    files = st.file_uploader("上傳圖片（jpg/png/jpeg）", type=["jpg","jpeg","png"], accept_multiple_files=True)
+st.sidebar.title("🍽️ 線上點餐（雙菜單）")
+with st.sidebar.expander("菜單圖片維護（建議上傳 2 張）", expanded=False):
+    files = st.file_uploader("上傳圖片（jpg/png，可多選）", type=["jpg","jpeg","png"], accept_multiple_files=True)
     if files:
         for f in files:
             Image.open(f).save(IMG_DIR / f"{uuid.uuid4().hex}.png")
         st.success("圖片已上傳！重新整理即可看到。")
 
-mode = st.sidebar.radio("模式 / Mode", ["前台點餐", "餐點確認"])
+mode = st.sidebar.radio("模式 / Mode", ["前台點餐", "管理者模式"])
 
 # ========= 前台點餐 =========
 if mode == "前台點餐":
-    st.title("📋 線上點餐")
+    st.title("📋 線上點餐（寫入 Excel）")
     passed, msg = cutoff_state(CUTOFF)
     st.info(msg)
 
@@ -211,43 +211,64 @@ if mode == "前台點餐":
                         st.session_state.pop("zoom_target", None)
         st.divider()
 
-    # 點餐列（預設 2 列）
+    # ====== 填寫餐點（加入「版本號」避免清空不生效） ======
     st.subheader("填寫餐點")
     session_key = "rows_single_page_store"
+
+    # 初始化 rows 與 版本號
     if session_key not in st.session_state:
         st.session_state[session_key] = [
-            {"item_name":"","unit_price":0.0,"qty":0},
-            {"item_name":"","unit_price":0.0,"qty":0},
+            {"item_name": "", "unit_price": 0.0, "qty": 0},
+            {"item_name": "", "unit_price": 0.0, "qty": 0},
         ]
+    vkey = f"{session_key}_ver"
+    if vkey not in st.session_state:
+        st.session_state[vkey] = 0  # 版本號(用來刷新所有輸入元件)
 
     def add_row():
-        st.session_state[session_key].append({"item_name":"","unit_price":0.0,"qty":0})
-    def clear_rows():
-        st.session_state[session_key] = [
-            {"item_name":"","unit_price":0.0,"qty":0},
-            {"item_name":"","unit_price":0.0,"qty":0},
-        ]
-        st.rerun()  # ✅ 強制重新整理畫面
+        st.session_state[session_key].append({"item_name": "", "unit_price": 0.0, "qty": 0})
 
-    c1, c2, _ = st.columns([1,1,6])
-    c1.button("新增", on_click=add_row, disabled=passed, use_container_width=True)
-    c2.button("清空", on_click=clear_rows, disabled=passed, use_container_width=True)
+    def clear_rows():
+        # 重設兩列 + 版本號+1（強制所有輸入元件換新key）
+        st.session_state[session_key] = [
+            {"item_name": "", "unit_price": 0.0, "qty": 0},
+            {"item_name": "", "unit_price": 0.0, "qty": 0},
+        ]
+        st.session_state[vkey] += 1
+        # 同時把姓名/備註也清掉（選擇性）
+        st.session_state["name_single_store"] = ""
+        st.session_state["note_single_store"] = ""
+        st.rerun()
+
+    c1, c2, _ = st.columns([1, 1, 6])
+    c1.button("新增一列", on_click=add_row, disabled=passed, use_container_width=True)
+    c2.button("清空（保留 2 列）", on_click=clear_rows, disabled=passed, use_container_width=True)
 
     total = 0
-    with st.form("order_form_single_page_store", clear_on_submit=False):
+    ver = st.session_state[vkey]  # 目前版本號
+
+    with st.form(f"order_form_single_page_store_v{ver}", clear_on_submit=False):
         rows = st.session_state[session_key]
         for i, r in enumerate(rows):
-            a, b, c, d = st.columns([4,2,2,2])
-            r["item_name"]  = a.text_input("品項名稱", r["item_name"], key=f"nm_{i}", disabled=passed)
-            r["unit_price"] = b.number_input("單價", min_value=0.0, step=1.0, value=float(r["unit_price"]), key=f"pr_{i}", disabled=passed)
-            r["qty"]        = c.number_input("數量", min_value=0, step=1, value=int(r["qty"]), key=f"qt_{i}", disabled=passed)
-            d.write(f"小計：${int(r['unit_price']*r['qty'])}")
-            total += int(r["unit_price"]*r["qty"])
+            key_suffix = f"{ver}_{i}"
+            a, b, c, d = st.columns([4, 2, 2, 2])
+            r["item_name"]  = a.text_input("品項名稱", r["item_name"], key=f"nm_{key_suffix}", disabled=passed)
+            r["unit_price"] = b.number_input("單價", min_value=0.0, step=1.0, value=float(r["unit_price"]), key=f"pr_{key_suffix}", disabled=passed)
+            r["qty"]        = c.number_input("數量", min_value=0, step=1, value=int(r["qty"]), key=f"qt_{key_suffix}", disabled=passed)
+            d.write(f"小計：${int(r['unit_price'] * r['qty'])}")
+            total += int(r["unit_price"] * r["qty"])
 
         st.markdown(f"### 總計：${total}")
-        name = st.text_input("姓名/暱稱", "", disabled=passed, key="name_single_store")
-        note = st.text_input("備註（例如不要香菜／飲品糖冰）", "", disabled=passed, key="note_single_store")
+        # 姓名/備註也帶版本，避免殘留
+        name = st.text_input("姓名/暱稱", st.session_state.get("name_single_store",""), key=f"name_single_store_{ver}", disabled=passed)
+        note = st.text_input("備註（例如不要香菜／飲品糖冰）", st.session_state.get("note_single_store",""), key=f"note_single_store_{ver}", disabled=passed)
         submitted = st.form_submit_button("送出訂單", type="primary", use_container_width=True, disabled=passed)
+
+    # 回存姓名/備註到固定鍵（讓下次顯示預設值）
+    if 'name' in locals():
+        st.session_state["name_single_store"] = name
+    if 'note' in locals():
+        st.session_state["note_single_store"] = note
 
     if submitted:
         if not name.strip():
@@ -293,7 +314,7 @@ if mode == "前台點餐":
 
 # ========= 管理者模式 =========
 else:
-    st.title("🔧 餐點確認")
+    st.title("🔧 餐點確認（管理者）")
 
     orders = load_orders()
     items  = load_order_items()
@@ -383,5 +404,3 @@ else:
         mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
         use_container_width=True
     )
-
-
