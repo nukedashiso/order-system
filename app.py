@@ -8,6 +8,42 @@ import io
 from datetime import datetime
 from zoneinfo import ZoneInfo
 from openpyxl import load_workbook
+import requests
+
+GITHUB_REPO   = st.secrets.get("GITHUB_REPO", "nukedashiso/order-system")
+GITHUB_BRANCH = st.secrets.get("GITHUB_BRANCH", "main")
+# GITHUB_TOKEN  = st.secrets.get("GITHUB_TOKEN", None)  # 私有 repo 才需要
+
+def _gh_headers():
+    return {"Authorization": f"Bearer {GITHUB_TOKEN}"} if GITHUB_TOKEN else {}
+
+def gh_read_csv(path_in_repo: str) -> pd.DataFrame:
+    url = f"https://raw.githubusercontent.com/{GITHUB_REPO}/{GITHUB_BRANCH}/{path_in_repo}"
+    r = requests.get(url, headers=_gh_headers(), timeout=15)
+    r.raise_for_status()
+    return pd.read_csv(io.BytesIO(r.content), dtype=str)
+
+def gh_read_excel(path_in_repo: str, sheet_name=0) -> pd.DataFrame:
+    url = f"https://raw.githubusercontent.com/{GITHUB_REPO}/{GITHUB_BRANCH}/{path_in_repo}"
+    r = requests.get(url, headers=_gh_headers(), timeout=15)
+    r.raise_for_status()
+    return pd.read_excel(io.BytesIO(r.content), sheet_name=sheet_name, engine="openpyxl")
+
+# 用 GitHub 版本覆寫原本的 load_*：
+def load_orders():
+    try:
+        return gh_read_csv("data/orders.csv")
+    except Exception:
+        return pd.DataFrame(columns=["order_id","user_name","note","created_at","is_paid"])
+
+def load_order_items():
+    try:
+        df = gh_read_csv("data/order_items.csv").fillna("")
+        if "qty" in df.columns: df["qty"] = pd.to_numeric(df["qty"], errors="coerce").fillna(0).astype(int)
+        if "unit_price" in df.columns: df["unit_price"] = pd.to_numeric(df["unit_price"], errors="coerce").fillna(0.0)
+        return df
+    except Exception:
+        return pd.DataFrame(columns=["order_id","item_name","qty","unit_price"])
 
 # ========= 基本設定 =========
 st.set_page_config(page_title="月會下午茶線上點餐", page_icon="🍱", layout="wide")
@@ -404,6 +440,7 @@ else:
         mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
         use_container_width=True
     )
+
 
 
 
