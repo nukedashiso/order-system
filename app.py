@@ -24,7 +24,7 @@ SUMMARY_WS = "Summary"
 # 路徑
 BASE = Path(".")
 DATA_DIR = BASE / "data"
-IMG_DIR = BASE / "images" / "menus"   # 放兩張菜單圖片
+IMG_DIR = BASE /  "menus"   # 放兩張菜單圖片
 DATA_DIR.mkdir(parents=True, exist_ok=True)
 IMG_DIR.mkdir(parents=True, exist_ok=True)
 if EXCEL_PATH:
@@ -404,5 +404,6 @@ else:
         mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
         use_container_width=True
     )
+
 
 
